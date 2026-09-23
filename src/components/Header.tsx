@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPath, onNavigate }) => {
           </button>
 
           <div className="hidden md:block">
-            <MetaStrip items={['SEPT—DEC 2026', 'NIGERIA']} />
+            <MetaStrip items={['SEPT - DEC 2026', 'NIGERIA']} />
           </div>
         </div>
 

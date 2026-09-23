@@ -15,6 +15,28 @@ interface GroupedEvents {
 }
 
 export const EventList: React.FC<EventListProps> = ({ events, onSelectEvent }) => {
+  const [visibleLimit, setVisibleLimit] = React.useState<number>(30);
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    // Reset visible limit if filters change the total events count significantly
+    setVisibleLimit(30);
+  }, [events.length]);
+
+  React.useEffect(() => {
+    if (!sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleLimit < events.length) {
+          setVisibleLimit((prev) => Math.min(prev + 30, events.length));
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [visibleLimit, events.length]);
+
   if (events.length === 0) {
     return (
       <div className="py-24 px-4 text-center space-y-4 max-w-md mx-auto">
@@ -26,11 +48,14 @@ export const EventList: React.FC<EventListProps> = ({ events, onSelectEvent }) =
     );
   }
 
+  // Paginated visible slice
+  const visibleEvents = events.slice(0, visibleLimit);
+
   // Group events by Month and Year (e.g. "October 2026")
   const grouped: GroupedEvents[] = [];
   const monthMap = new Map<string, Event[]>();
 
-  events.forEach((event) => {
+  visibleEvents.forEach((event) => {
     const d = new Date(event.startDate);
     const monthTitle = d.toLocaleString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
     const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -83,6 +108,19 @@ export const EventList: React.FC<EventListProps> = ({ events, onSelectEvent }) =
           </div>
         </section>
       ))}
+
+      {/* Sentinel & Load More trigger */}
+      {visibleLimit < events.length && (
+        <div ref={sentinelRef} className="py-8 text-center space-y-3">
+          <button
+            type="button"
+            onClick={() => setVisibleLimit((prev) => Math.min(prev + 30, events.length))}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-[#171717] border border-[#262626] text-[#D4D4D4] hover:text-[#FFFFFF] hover:border-[#404040] text-xs font-mono transition-colors"
+          >
+            <span>Load More Convenings ({events.length - visibleLimit} remaining)</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

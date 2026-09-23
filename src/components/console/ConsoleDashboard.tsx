@@ -48,12 +48,12 @@ export const ConsoleDashboard: React.FC<ConsoleDashboardProps> = ({
   }, [dashboardPreset]);
 
   const handleExportCSV = () => {
-    // TODO(handoff): CSV export
-    setExportMessage('Generating partner pipeline CSV snapshot…');
+    setExportMessage('Generating quarterly partner audit report...');
+    window.location.href = '/api/export/quarterly-summary';
     setTimeout(() => {
-      setExportMessage('CSV snapshot ready (Logged to handoff callback).');
+      setExportMessage('Quarterly audit report CSV downloaded.');
       setTimeout(() => setExportMessage(null), 3500);
-    }, 800);
+    }, 1200);
   };
 
   const stages: PipelineStage[] = [

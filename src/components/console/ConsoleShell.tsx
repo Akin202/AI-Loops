@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Shield,
   Eye,
+  LogOut,
 } from 'lucide-react';
 import { DevStateSwitcher, type PipelineDevPreset, type DashboardDevPreset } from './DevStateSwitcher';
 
@@ -19,11 +20,13 @@ interface ConsoleShellProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onNavigatePublic: () => void;
+  onSignOut?: () => void;
   children: React.ReactNode;
 
   // Global console dev states
   connectionState: ConnectionState;
   setConnectionState: (c: ConnectionState) => void;
+  pendingWritesCount?: number;
   currentRole: TeamRole;
   setCurrentRole: (r: TeamRole) => void;
   pipelinePreset: PipelineDevPreset;
@@ -36,9 +39,11 @@ export const ConsoleShell: React.FC<ConsoleShellProps> = ({
   currentPath,
   onNavigate,
   onNavigatePublic,
+  onSignOut,
   children,
   connectionState,
   setConnectionState,
+  pendingWritesCount = 0,
   currentRole,
   setCurrentRole,
   pipelinePreset,
@@ -107,13 +112,17 @@ export const ConsoleShell: React.FC<ConsoleShellProps> = ({
               {connectionState === 'syncing' && (
                 <>
                   <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
-                  <span className="hidden md:inline">Syncing…</span>
+                  <span className="hidden md:inline">
+                    {pendingWritesCount > 0 ? `Syncing (${pendingWritesCount})...` : 'Syncing...'}
+                  </span>
                 </>
               )}
               {connectionState === 'offline' && (
                 <>
                   <WifiOff className="w-3 h-3 text-rose-600" />
-                  <span className="hidden md:inline">Offline</span>
+                  <span className="hidden md:inline">
+                    {pendingWritesCount > 0 ? `Offline (${pendingWritesCount} queued)` : 'Offline'}
+                  </span>
                 </>
               )}
             </div>
@@ -139,6 +148,19 @@ export const ConsoleShell: React.FC<ConsoleShellProps> = ({
               <span className="hidden sm:inline">Public Portal</span>
               <ExternalLink className="w-3 h-3 text-[#78716C]" />
             </button>
+
+            {/* Sign Out link */}
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-[#78716C] hover:text-[#DC2626] bg-[#FAFAF9] hover:bg-rose-50 border border-[#E7E5E4] rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#DC2626] min-h-[36px]"
+                title="Sign out of Console"
+              >
+                <LogOut className="w-3 h-3" />
+                <span className="hidden sm:inline">Sign Out</span>
+              </button>
+            )}
           </div>
         </div>
       </header>

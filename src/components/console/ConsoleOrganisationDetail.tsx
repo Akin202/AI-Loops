@@ -31,8 +31,13 @@ import {
   UserCheck,
   Send,
   MessageSquare,
-  Sparkles,
+  Copy,
+  FileText,
+  X,
 } from 'lucide-react';
+import { loopsConfig } from '../../../config/loops.config.ts';
+import { OutreachDraftModal } from './OutreachDraftModal';
+import { offlineQueue } from '../../../lib/offline-queue';
 
 interface ConsoleOrganisationDetailProps {
   orgId: string;
@@ -69,6 +74,9 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
   const [interactionDirection, setInteractionDirection] = useState<InteractionDirection>('Outbound');
   const [interactionSummary, setInteractionSummary] = useState('');
   const [interactionDate, setInteractionDate] = useState(() => new Date().toISOString().slice(0, 16));
+
+  // Outreach Draft Modal State
+  const [showOutreachModal, setShowOutreachModal] = useState(false);
 
   const stages: PipelineStage[] = [
     'Lead',
@@ -153,14 +161,36 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
     e.preventDefault();
     if (currentRole === 'Viewer' || !contactName.trim() || !contactEmail.trim()) return;
 
+    const contactPayload = {
+      name: contactName.trim(),
+      title: contactTitle.trim() || 'Representative',
+      email: contactEmail.trim(),
+      phone: contactPhone.trim(),
+      isPrimary: contactIsPrimary,
+    };
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      offlineQueue.enqueue('addOrganisationContact', { orgId: org.id, data: contactPayload });
+      const optimisticContact = { ...contactPayload, id: `offline-c-${Date.now()}` };
+      setOrg((prev) =>
+        prev
+          ? {
+              ...prev,
+              contacts: prev.contacts ? [...prev.contacts, optimisticContact] : [optimisticContact],
+            }
+          : prev
+      );
+      setContactName('');
+      setContactTitle('');
+      setContactEmail('');
+      setContactPhone('');
+      setContactIsPrimary(false);
+      setShowAddContact(false);
+      return;
+    }
+
     try {
-      const newContact = await addOrganisationContact(org.id, {
-        name: contactName.trim(),
-        title: contactTitle.trim() || 'Representative',
-        email: contactEmail.trim(),
-        phone: contactPhone.trim(),
-        isPrimary: contactIsPrimary,
-      });
+      const newContact = await addOrganisationContact(org.id, contactPayload);
 
       setOrg((prev) =>
         prev
@@ -179,7 +209,8 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
       setContactIsPrimary(false);
       setShowAddContact(false);
     } catch (err) {
-      console.error('Failed to add contact:', err);
+      console.warn('Network issue adding contact, saving to offline queue:', err);
+      offlineQueue.enqueue('addOrganisationContact', { orgId: org.id, data: contactPayload });
     }
   };
 
@@ -187,14 +218,31 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
     e.preventDefault();
     if (currentRole === 'Viewer' || !interactionSummary.trim()) return;
 
+    const interactionPayload = {
+      date: new Date(interactionDate).toISOString(),
+      channel: interactionChannel,
+      direction: interactionDirection,
+      summary: interactionSummary.trim(),
+      loggedBy: currentRole === 'Lead' ? 'Tolu Adebayo' : 'Console User',
+    };
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      offlineQueue.enqueue('logOrganisationInteraction', { orgId: org.id, data: interactionPayload });
+      const optimisticInt = { ...interactionPayload, id: `offline-int-${Date.now()}` };
+      setOrg((prev) =>
+        prev
+          ? {
+              ...prev,
+              interactions: prev.interactions ? [optimisticInt, ...prev.interactions] : [optimisticInt],
+            }
+          : prev
+      );
+      setInteractionSummary('');
+      return;
+    }
+
     try {
-      const newInt = await logOrganisationInteraction(org.id, {
-        date: new Date(interactionDate).toISOString(),
-        channel: interactionChannel,
-        direction: interactionDirection,
-        summary: interactionSummary.trim(),
-        loggedBy: currentRole === 'Lead' ? 'Tolu Adebayo' : 'Console User',
-      });
+      const newInt = await logOrganisationInteraction(org.id, interactionPayload);
 
       setOrg((prev) =>
         prev
@@ -207,7 +255,8 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
 
       setInteractionSummary('');
     } catch (err) {
-      console.error('Failed to log interaction:', err);
+      console.warn('Network issue logging interaction, saving to offline queue:', err);
+      offlineQueue.enqueue('logOrganisationInteraction', { orgId: org.id, data: interactionPayload });
     }
   };
 
@@ -254,7 +303,7 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
             <p className="text-xs text-[#78716C]">{org.sector}</p>
           </div>
 
-          <div className="flex items-center gap-4 text-xs font-mono">
+          <div className="flex items-center gap-3 text-xs font-mono">
             <div className="text-right">
               <span className="text-[#78716C] block text-[10px] uppercase">Account Owner</span>
               <span className="font-semibold text-[#1C1917]">{org.owner || 'Unassigned'}</span>
@@ -270,6 +319,14 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
                 <ExternalLink className="w-4 h-4" />
               </a>
             )}
+            <button
+              type="button"
+              onClick={() => setShowOutreachModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1D4ED8] text-white hover:bg-[#1E40AF] rounded text-xs font-medium transition-colors shadow-2xs"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Draft Outreach</span>
+            </button>
           </div>
         </div>
 
@@ -797,7 +854,6 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
             <div className="space-y-0.5 font-mono text-[11px]">
               <span className="font-bold">Automated Engagement Index:</span>
               <p>
-                {/* // TODO(handoff): score KPIs server-side */}
                 Metrics are calculated periodically from public portal event contributions, community engagements, and bilateral MoU milestone completion. Scored server-side.
               </p>
             </div>
@@ -841,6 +897,18 @@ export const ConsoleOrganisationDetail: React.FC<ConsoleOrganisationDetailProps>
           </div>
         </div>
       )}
+
+      {/* Outreach Draft Modal */}
+      <OutreachDraftModal
+        isOpen={showOutreachModal}
+        onClose={() => setShowOutreachModal(false)}
+        organisation={org}
+        currentRole={currentRole}
+        onInteractionLogged={async () => {
+          const refreshed = await getOrganisationById(org.id);
+          if (refreshed) setOrg(refreshed);
+        }}
+      />
     </div>
   );
 };

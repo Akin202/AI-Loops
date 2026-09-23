@@ -11,6 +11,7 @@ import {
   getPipelineOrganisations,
   updateOrganisationStage,
 } from '../../../lib/data-access';
+import { offlineQueue } from '../../../lib/offline-queue';
 import {
   Search,
   SlidersHorizontal,
@@ -23,6 +24,7 @@ import {
   ChevronRight,
   X,
   AlertCircle,
+  Download,
 } from 'lucide-react';
 import type { PipelineDevPreset } from './DevStateSwitcher';
 
@@ -148,25 +150,33 @@ export const ConsolePipeline: React.FC<ConsolePipelineProps> = ({
   };
 
   const executeStageChange = async (orgId: string, targetStage: PipelineStage, reason?: string) => {
+    const previous = organisations;
+    // 1. Optimistic update
+    setOrganisations((prev) =>
+      prev.map((o) =>
+        o.id === orgId
+          ? {
+              ...o,
+              stage: targetStage,
+              status: targetStage === 'Inactive' ? 'inactive' : 'active',
+              inactiveReason: reason,
+            }
+          : o
+      )
+    );
+    setInactiveModal(null);
+
+    // 2. Persist to backend
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      offlineQueue.enqueue('updateOrganisationStage', { id: orgId, newStage: targetStage, reason });
+      return;
+    }
+
     try {
-      // TODO(handoff): persist stage change
       await updateOrganisationStage(orgId, targetStage, reason);
-      // Update local state smoothly
-      setOrganisations((prev) =>
-        prev.map((o) =>
-          o.id === orgId
-            ? {
-                ...o,
-                stage: targetStage,
-                status: targetStage === 'Inactive' ? 'inactive' : 'active',
-                inactiveReason: reason,
-              }
-            : o
-        )
-      );
-      setInactiveModal(null);
-    } catch (err) {
-      console.error('Failed to update stage:', err);
+    } catch (err: any) {
+      console.warn('Network issue during stage transition, saving to offline queue:', err);
+      offlineQueue.enqueue('updateOrganisationStage', { id: orgId, newStage: targetStage, reason });
     }
   };
 
@@ -257,32 +267,51 @@ export const ConsolePipeline: React.FC<ConsolePipelineProps> = ({
           </p>
         </div>
 
-        {/* View Toggle */}
-        <div className="inline-flex rounded border border-[#E7E5E4] bg-[#FFFFFF] p-0.5 shadow-2xs">
+        <div className="flex items-center gap-2">
+          {/* Export CSV Button */}
           <button
             type="button"
-            onClick={() => setViewMode('table')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-              viewMode === 'table'
-                ? 'bg-[#1D4ED8] text-white'
-                : 'text-[#44403C] hover:text-[#1C1917]'
-            }`}
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (selectedStage !== 'All') params.set('stage', selectedStage);
+              if (selectedSector !== 'All') params.set('sector', selectedSector);
+              if (selectedTier !== 'All') params.set('tier', selectedTier);
+              window.location.href = `/api/export/organisations?${params.toString()}`;
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-[#E7E5E4] bg-[#FFFFFF] hover:bg-[#F5F5F4] text-[#1C1917] transition-colors shadow-2xs cursor-pointer min-h-[32px]"
+            title="Export filtered pipeline to CSV"
           >
-            <TableIcon className="w-3.5 h-3.5" />
-            <span>Table</span>
+            <Download className="w-3.5 h-3.5 text-[#78716C]" />
+            <span>Export CSV</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('board')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-              viewMode === 'board'
-                ? 'bg-[#1D4ED8] text-white'
-                : 'text-[#44403C] hover:text-[#1C1917]'
-            }`}
-          >
-            <Kanban className="w-3.5 h-3.5" />
-            <span>Board (6 Stages)</span>
-          </button>
+
+          {/* View Toggle */}
+          <div className="inline-flex rounded border border-[#E7E5E4] bg-[#FFFFFF] p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                viewMode === 'table'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-[#44403C] hover:text-[#1C1917]'
+              }`}
+            >
+              <TableIcon className="w-3.5 h-3.5" />
+              <span>Table</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('board')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                viewMode === 'board'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-[#44403C] hover:text-[#1C1917]'
+              }`}
+            >
+              <Kanban className="w-3.5 h-3.5" />
+              <span>Board (6 Stages)</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -549,7 +578,7 @@ export const ConsolePipeline: React.FC<ConsolePipelineProps> = ({
 
                         {/* Next Action */}
                         <td className="py-2.5 px-3 text-[#44403C] max-w-xs truncate" title={org.nextAction}>
-                          {org.nextAction || '—'}
+                          {org.nextAction || '-'}
                         </td>
 
                         {/* Next Date (Red when overdue) */}
@@ -572,7 +601,7 @@ export const ConsolePipeline: React.FC<ConsolePipelineProps> = ({
                               </span>
                             </span>
                           ) : (
-                            <span className="text-[#A8A29E]">—</span>
+                            <span className="text-[#A8A29E]">-</span>
                           )}
                         </td>
                       </tr>

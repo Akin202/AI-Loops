@@ -16,18 +16,50 @@ import { EventList } from './components/EventList';
 import { EventDetail } from './components/EventDetail';
 import { SubmitForm } from './components/SubmitForm';
 import { Footer } from './components/Footer';
+import { NotFound } from './components/NotFound';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Console Surfaces
-import { ConsoleShell } from './components/console/ConsoleShell';
-import { ConsoleDashboard } from './components/console/ConsoleDashboard';
-import { ConsolePipeline } from './components/console/ConsolePipeline';
-import { ConsoleOrganisationDetail } from './components/console/ConsoleOrganisationDetail';
-import { ConsoleEvents } from './components/console/ConsoleEvents';
-import { ConsoleIngest } from './components/console/ConsoleIngest';
-import { ConsoleTeam } from './components/console/ConsoleTeam';
+// Lazy-loaded Console Surfaces to optimize public bundle size
+const ConsoleShell = React.lazy(() =>
+  import('./components/console/ConsoleShell').then((m) => ({ default: m.ConsoleShell }))
+);
+const ConsoleDashboard = React.lazy(() =>
+  import('./components/console/ConsoleDashboard').then((m) => ({ default: m.ConsoleDashboard }))
+);
+const ConsolePipeline = React.lazy(() =>
+  import('./components/console/ConsolePipeline').then((m) => ({ default: m.ConsolePipeline }))
+);
+const ConsoleOrganisationDetail = React.lazy(() =>
+  import('./components/console/ConsoleOrganisationDetail').then((m) => ({
+    default: m.ConsoleOrganisationDetail,
+  }))
+);
+const ConsoleEvents = React.lazy(() =>
+  import('./components/console/ConsoleEvents').then((m) => ({ default: m.ConsoleEvents }))
+);
+const ConsoleIngest = React.lazy(() =>
+  import('./components/console/ConsoleIngest').then((m) => ({ default: m.ConsoleIngest }))
+);
+const ConsoleTeam = React.lazy(() =>
+  import('./components/console/ConsoleTeam').then((m) => ({ default: m.ConsoleTeam }))
+);
+const ConsoleLogin = React.lazy(() =>
+  import('./components/console/ConsoleLogin.tsx').then((m) => ({ default: m.ConsoleLogin }))
+);
+
+import { AuthProvider, useAuth } from './context/AuthContext.tsx';
+import { offlineQueue } from '../lib/offline-queue.ts';
 import type { PipelineDevPreset, DashboardDevPreset } from './components/console/DevStateSwitcher';
 
-export default function App() {
+function ConsoleLoadingFallback() {
+  return (
+    <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center p-8 text-xs font-mono text-[#78716C]">
+      Loading console surface...
+    </div>
+  );
+}
+
+function MainApp() {
   const [currentPath, setCurrentPath] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return window.location.pathname || '/';
@@ -38,9 +70,27 @@ export default function App() {
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Global Console Simulated States
+  // Authentication State
+  const { user, role: authRole, loading: authLoading, signOut } = useAuth();
+
+  // Global Console Connectivity & Resilience
   const [connectionState, setConnectionState] = useState<ConnectionState>('online');
+  const [pendingWritesCount, setPendingWritesCount] = useState<number>(0);
   const [currentRole, setCurrentRole] = useState<TeamRole>('Lead');
+
+  useEffect(() => {
+    if (authRole) {
+      setCurrentRole(authRole);
+    }
+  }, [authRole]);
+
+  useEffect(() => {
+    const unsubscribe = offlineQueue.subscribe((status, pending) => {
+      setConnectionState(status);
+      setPendingWritesCount(pending);
+    });
+    return unsubscribe;
+  }, []);
   const [pipelinePreset, setPipelinePreset] = useState<PipelineDevPreset>('normal');
   const [dashboardPreset, setDashboardPreset] = useState<DashboardDevPreset>('normal');
 
@@ -134,6 +184,22 @@ export default function App() {
   // Aesthetic: Light, dense, plain business tool (#FAFAF9, #FFFFFF, #E7E5E4)
   // -------------------------------------------------------------
   if (currentPath.startsWith('/console')) {
+    if (authLoading) {
+      return (
+        <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center font-mono text-xs text-[#78716C]">
+          Authenticating Loops Console...
+        </div>
+      );
+    }
+
+    if (!user) {
+      return (
+        <React.Suspense fallback={<ConsoleLoadingFallback />}>
+          <ConsoleLogin onNavigatePublic={() => navigate('/')} />
+        </React.Suspense>
+      );
+    }
+
     const renderConsoleContent = () => {
       if (currentPath === '/console' || currentPath === '/console/') {
         return (
@@ -197,21 +263,25 @@ export default function App() {
     };
 
     return (
-      <ConsoleShell
-        currentPath={currentPath}
-        onNavigate={navigate}
-        onNavigatePublic={() => navigate('/')}
-        connectionState={connectionState}
-        setConnectionState={setConnectionState}
-        currentRole={currentRole}
-        setCurrentRole={setCurrentRole}
-        pipelinePreset={pipelinePreset}
-        setPipelinePreset={setPipelinePreset}
-        dashboardPreset={dashboardPreset}
-        setDashboardPreset={setDashboardPreset}
-      >
-        {renderConsoleContent()}
-      </ConsoleShell>
+      <React.Suspense fallback={<ConsoleLoadingFallback />}>
+        <ConsoleShell
+          currentPath={currentPath}
+          onNavigate={navigate}
+          onNavigatePublic={() => navigate('/')}
+          onSignOut={signOut}
+          connectionState={connectionState}
+          setConnectionState={setConnectionState}
+          pendingWritesCount={pendingWritesCount}
+          currentRole={currentRole}
+          setCurrentRole={setCurrentRole}
+          pipelinePreset={pipelinePreset}
+          setPipelinePreset={setPipelinePreset}
+          dashboardPreset={dashboardPreset}
+          setDashboardPreset={setDashboardPreset}
+        >
+          {renderConsoleContent()}
+        </ConsoleShell>
+      </React.Suspense>
     );
   }
 
@@ -242,33 +312,38 @@ export default function App() {
       );
     }
 
-    // Default to Public Home Directory
-    return (
-      <main className="space-y-6">
-        <Hero onNavigateSubmit={() => navigate('/submit')} />
-        <FilterBar
-          filters={filters}
-          onFilterChange={setFilters}
-          totalCount={allEvents.length}
-          filteredCount={filteredEvents.length}
-          onExportFilteredIcs={() => {
-            if (filteredEvents.length > 0) {
-              downloadIcsFile(filteredEvents, 'ai-loops-nigeria-events.ics');
-            }
-          }}
-        />
-        {loading ? (
-          <div className="py-24 text-center text-xs uppercase font-mono tracking-widest text-[#737373]">
-            SYNCHRONISING AI LOOPS REPOSITORY...
-          </div>
-        ) : (
-          <EventList
-            events={filteredEvents}
-            onSelectEvent={(slug) => navigate(`/events/${slug}`)}
+    // Home directory
+    if (currentPath === '/' || currentPath === '') {
+      return (
+        <main className="space-y-6">
+          <Hero onNavigateSubmit={() => navigate('/submit')} />
+          <FilterBar
+            filters={filters}
+            onFilterChange={setFilters}
+            totalCount={allEvents.length}
+            filteredCount={filteredEvents.length}
+            onExportFilteredIcs={() => {
+              if (filteredEvents.length > 0) {
+                downloadIcsFile(filteredEvents, 'ai-loops-nigeria-events.ics');
+              }
+            }}
           />
-        )}
-      </main>
-    );
+          {loading ? (
+            <div className="py-24 text-center text-xs uppercase font-mono tracking-widest text-[#737373]">
+              SYNCHRONISING AI LOOPS REPOSITORY...
+            </div>
+          ) : (
+            <EventList
+              events={filteredEvents}
+              onSelectEvent={(slug) => navigate(`/events/${slug}`)}
+            />
+          )}
+        </main>
+      );
+    }
+
+    // Unmatched public route: Custom 404
+    return <NotFound onNavigate={navigate} />;
   };
 
   return (
@@ -280,5 +355,15 @@ export default function App() {
         onNavigateSubmit={() => navigate('/submit')}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

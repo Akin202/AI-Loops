@@ -423,7 +423,7 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({
               onChange={(e) => updateField('organisationId', e.target.value || undefined)}
               className="w-full text-xs sm:text-sm px-3 py-2 rounded border border-[#E7E5E4] bg-[#FFFFFF] text-[#1C1917] focus:outline-none focus:ring-1 focus:ring-[#1D4ED8] min-h-[44px]"
             >
-              <option value="">— None (Unassigned) —</option>
+              <option value="">None (Unassigned)</option>
               {organisations.map((org) => (
                 <option key={org.id} value={org.id}>
                   {org.name} ({org.sector})

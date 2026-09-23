@@ -1,7 +1,7 @@
 export const loopsConfig = {
   name: 'AI Loops',
   tagline: 'NIGERIA AI & TECH CONVENING REGISTRY',
-  taglineItems: ['NATIONAL REPOSITORY', 'SEPT–DEC 2026', 'WEST AFRICA'],
+  taglineItems: ['NATIONAL REPOSITORY', 'SEPT - DEC 2026', 'WEST AFRICA'],
   description: 'An authoritative public index of artificial intelligence gatherings, tech conferences, hackathons, and convenings across Nigeria.',
   org: {
     name: 'National Centre for AI & Robotics',
@@ -11,6 +11,20 @@ export const loopsConfig = {
     website: 'https://ncair.nitda.gov.ng',
   },
   undpProgrammeLine: 'Facilitated under the UNDP Nigeria Artificial Intelligence Ecosystem & Digital Transformation Framework.',
+  contactEmail: 'partnerships@ai-loops.ng',
+  supportUrl: 'https://ai-loops.ng/support',
+  country: 'Nigeria',
+  currency: 'NGN',
+  currencySymbol: '₦',
+  timezone: 'Africa/Lagos',
+  stageColors: {
+    Lead: { bg: '#F5F5F4', text: '#44403C', border: '#E7E5E4' },
+    Contacted: { bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE' },
+    Engaged: { bg: '#F5F3FF', text: '#7C3AED', border: '#DDD6FE' },
+    Partnered: { bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' },
+    Champion: { bg: '#FFFBEB', text: '#B45309', border: '#FDE68A' },
+    Inactive: { bg: '#FFF1F2', text: '#BE123C', border: '#FECDD3' },
+  },
   sectors: [
     'Artificial Intelligence',
     'Fintech',

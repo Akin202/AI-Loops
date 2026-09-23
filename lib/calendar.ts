@@ -101,7 +101,7 @@ export function generateEventVEvent(event: Event): string {
     event.price ? `Admission: ${event.price}` : `Admission: ${event.priceType || 'Free'}`,
     event.registrationUrl ? `Registration & Info: ${event.registrationUrl}` : '',
     '',
-    'Indexed by AI Loops — Nigeria AI & Tech Convening Registry',
+    'Indexed by AI Loops - Nigeria AI & Tech Convening Registry',
   ].filter(Boolean);
 
   const fullDescription = descriptionParts.join('\n');

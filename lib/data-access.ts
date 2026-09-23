@@ -4,6 +4,7 @@ import type {
   DashboardStats,
   Event,
   EventStatus,
+  ExtractedEventData,
   FilterState,
   Interaction,
   Organisation,
@@ -12,6 +13,7 @@ import type {
   TeamMember,
 } from '../types';
 import { mockEvents, mockOrganisations, mockTeamMembers } from './mock-data';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 /**
  * Access layer contract for all event, organisation, and pipeline queries.
@@ -126,6 +128,39 @@ function generate200Organisations(): Organisation[] {
 // ---------------------------------------------------------------------------
 
 export async function getAllEvents(): Promise<Event[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('start_date', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return data.map((d: any) => ({
+          id: d.id,
+          slug: d.slug,
+          title: d.title,
+          description: d.description,
+          startDate: d.start_date,
+          endDate: d.end_date || undefined,
+          city: d.city,
+          venue: d.venue,
+          organiser: d.organiser,
+          organiserId: d.organisation_id || d.organiser_id,
+          category: d.category,
+          format: d.format,
+          priceType: d.price_type,
+          price: d.price || undefined,
+          registrationUrl: d.registration_url,
+          featured: d.featured,
+          status: d.status,
+        }));
+      }
+    } catch (err) {
+      console.warn('Supabase getAllEvents failed, falling back to local store:', err);
+    }
+  }
+
   return [...eventsStore].sort(
     (a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
   );
@@ -210,9 +245,78 @@ export async function getFeaturedEvents(): Promise<Event[]> {
   return eventsStore.filter((e) => Boolean(e.featured));
 }
 
-export async function extractEvent(_rawInput: string): Promise<Partial<Event>> {
-  // TODO(handoff): replace with real Gemini extraction call
-  return Promise.reject(new Error('Extraction service not yet connected'));
+export function slugify(title: string, startDate?: string): string {
+  const d = startDate ? startDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const cleanTitle = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+  return `${cleanTitle}-${d}`;
+}
+
+export async function extractEvent(rawInput: string): Promise<{
+  data: ExtractedEventData;
+  missingFieldsCount: number;
+}> {
+  const res = await fetch('/api/extract-event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rawInput }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error || 'Extraction failed');
+  }
+  return {
+    data: json.data,
+    missingFieldsCount: json.missingFieldsCount || 0,
+  };
+}
+
+export async function createEvent(eventInput: Omit<Event, 'id'>): Promise<Event> {
+  const id = `ev-${Date.now()}`;
+  const newEvent: Event = {
+    ...eventInput,
+    id,
+    status: eventInput.status || 'published',
+  };
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .insert({
+          slug: newEvent.slug,
+          title: newEvent.title,
+          description: newEvent.description,
+          start_date: newEvent.startDate,
+          end_date: newEvent.endDate || null,
+          city: newEvent.city,
+          venue: newEvent.venue,
+          organiser: newEvent.organiser,
+          organiser_id: newEvent.organiserId || null,
+          category: newEvent.category,
+          format: newEvent.format,
+          price_type: newEvent.priceType,
+          price: newEvent.price || null,
+          registration_url: newEvent.registrationUrl,
+          featured: newEvent.featured || false,
+          status: newEvent.status || 'published',
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        newEvent.id = data.id;
+      }
+    } catch (err) {
+      console.warn('Supabase createEvent failed, using local store:', err);
+    }
+  }
+
+  eventsStore = [newEvent, ...eventsStore];
+  return newEvent;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,19 +513,58 @@ export async function updateOrganisationStage(
   newStage: PipelineStage,
   reason?: string
 ): Promise<Organisation> {
-  // TODO(handoff): persist stage change to backend datastore
+  if (newStage === 'Inactive' && (!reason || reason.trim().length < 5)) {
+    throw new Error('A detailed reason (at least 5 characters) is mandatory when marking an organisation as Inactive.');
+  }
+
   const orgIndex = organisationsStore.findIndex((o) => o.id === id);
   if (orgIndex === -1) {
     throw new Error(`Organisation ${id} not found`);
   }
 
   const org = organisationsStore[orgIndex];
+  const stageInteraction: Interaction = {
+    id: `int-${Date.now()}`,
+    date: new Date().toISOString(),
+    channel: 'Event',
+    direction: 'Outbound',
+    summary: `Stage changed: ${org.stage || 'Lead'} -> ${newStage}${reason ? ` (Reason: ${reason})` : ''}`,
+    loggedBy: 'Audit Trail',
+  };
+
+  const updatedInteractions = org.interactions ? [stageInteraction, ...org.interactions] : [stageInteraction];
+
   const updatedOrg: Organisation = {
     ...org,
     stage: newStage,
     status: newStage === 'Inactive' ? 'inactive' : 'active',
     inactiveReason: newStage === 'Inactive' ? reason : undefined,
+    interactions: updatedInteractions,
   };
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('organisations')
+        .update({
+          stage: newStage,
+          status: updatedOrg.status,
+          inactive_reason: updatedOrg.inactiveReason || null,
+        })
+        .eq('id', id);
+
+      await supabase.from('interactions').insert({
+        organisation_id: id,
+        date: stageInteraction.date,
+        channel: stageInteraction.channel,
+        direction: stageInteraction.direction,
+        summary: stageInteraction.summary,
+        logged_by: stageInteraction.loggedBy,
+      });
+    } catch (err) {
+      console.warn('Supabase updateOrganisationStage failed, using local state:', err);
+    }
+  }
 
   organisationsStore[orgIndex] = updatedOrg;
   return { ...updatedOrg };
@@ -441,6 +584,26 @@ export async function updateOrganisation(
     ...updates,
   };
 
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('organisations')
+        .update({
+          name: updatedOrg.name,
+          sector: updatedOrg.sector,
+          tier: updatedOrg.tier,
+          owner: updatedOrg.owner,
+          next_action: updatedOrg.nextAction,
+          next_action_at: updatedOrg.nextActionAt,
+          website: updatedOrg.website,
+          description: updatedOrg.description,
+        })
+        .eq('id', id);
+    } catch (err) {
+      console.warn('Supabase updateOrganisation error:', err);
+    }
+  }
+
   organisationsStore[orgIndex] = updatedOrg;
   return { ...updatedOrg };
 }
@@ -454,9 +617,32 @@ export async function addOrganisationContact(
     throw new Error(`Organisation ${orgId} not found`);
   }
 
+  let contactId = `c-${Date.now()}`;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('contacts')
+        .insert({
+          organisation_id: orgId,
+          name: contactData.name,
+          title: contactData.title,
+          email: contactData.email,
+          phone: contactData.phone,
+          is_primary: contactData.isPrimary || false,
+        })
+        .select()
+        .single();
+      if (!error && data) {
+        contactId = data.id;
+      }
+    } catch (err) {
+      console.warn('Supabase addOrganisationContact error:', err);
+    }
+  }
+
   const newContact: Contact = {
     ...contactData,
-    id: `c-${Date.now()}`,
+    id: contactId,
   };
 
   const org = organisationsStore[orgIndex];
@@ -479,9 +665,32 @@ export async function logOrganisationInteraction(
     throw new Error(`Organisation ${orgId} not found`);
   }
 
+  let interId = `int-${Date.now()}`;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('interactions')
+        .insert({
+          organisation_id: orgId,
+          date: interactionData.date || new Date().toISOString(),
+          channel: interactionData.channel,
+          direction: interactionData.direction,
+          summary: interactionData.summary,
+          logged_by: interactionData.loggedBy || 'Team Member',
+        })
+        .select()
+        .single();
+      if (!error && data) {
+        interId = data.id;
+      }
+    } catch (err) {
+      console.warn('Supabase logOrganisationInteraction error:', err);
+    }
+  }
+
   const newInteraction: Interaction = {
     ...interactionData,
-    id: `int-${Date.now()}`,
+    id: interId,
   };
 
   const org = organisationsStore[orgIndex];

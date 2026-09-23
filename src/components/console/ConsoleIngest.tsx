@@ -5,7 +5,7 @@ import type {
   Organisation,
   QueueItem,
 } from '../../../types';
-import { extractEvent, getAllOrganisations } from '../../../lib/data-access';
+import { extractEvent, getAllOrganisations, createEvent, slugify } from '../../../lib/data-access';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ReviewCard } from './ReviewCard';
 import { ReviewCardSkeleton } from './ReviewCardSkeleton';
@@ -258,10 +258,31 @@ export const ConsoleIngest: React.FC<ConsoleIngestProps> = ({
       });
       setActiveDevPreset('extracting');
 
-      // Wire button to extractEvent() from data-access (which currently rejects)
       try {
-        // TODO(handoff): replace with real Gemini extraction call
-        await extractEvent(lines[0]);
+        const result = await extractEvent(lines[0]);
+        const missingCount = result.missingFieldsCount || 0;
+        const newStatus = missingCount > 0 ? 'partial' : 'ready';
+
+        setExtractionState({
+          status: newStatus,
+          data: result.data,
+          missingFieldsCount: missingCount,
+          rawInput: lines[0],
+        });
+        setActiveDevPreset(newStatus);
+
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.rawInput === lines[0]
+              ? {
+                  ...item,
+                  status: newStatus,
+                  extractedTitle: result.data.title,
+                  extractedData: result.data,
+                }
+              : item
+          )
+        );
       } catch (err: unknown) {
         const errorMessage =
           err instanceof Error ? err.message : 'Extraction service not yet connected';
@@ -280,17 +301,42 @@ export const ConsoleIngest: React.FC<ConsoleIngestProps> = ({
 
   // Approve action handler
   const handleApprove = useCallback(
-    (dataToApprove: ExtractedEventData) => {
-      // TODO(handoff): replace with real approve & publish action
-      showToast(`Approved & published: "${dataToApprove.title}"`);
-      if (selectedQueueId) {
-        setQueue((prev) =>
-          prev.map((item) =>
-            item.id === selectedQueueId
-              ? { ...item, status: 'approved', extractedTitle: dataToApprove.title }
-              : item
-          )
-        );
+    async (dataToApprove: ExtractedEventData) => {
+      try {
+        const slug = slugify(dataToApprove.title, dataToApprove.startDate);
+        const created = await createEvent({
+          slug,
+          title: dataToApprove.title,
+          description: dataToApprove.description,
+          startDate: dataToApprove.startDate,
+          endDate: dataToApprove.endDate,
+          city: dataToApprove.city,
+          venue: dataToApprove.venue,
+          organiser: dataToApprove.organiser,
+          organiserId: dataToApprove.organisationId,
+          category: dataToApprove.category,
+          format: dataToApprove.format,
+          priceType: dataToApprove.priceType,
+          price: dataToApprove.price,
+          registrationUrl: dataToApprove.registrationUrl,
+          featured: false,
+          status: 'published',
+        });
+
+        showToast(`Approved & published: "${created.title}"`);
+        if (selectedQueueId) {
+          setQueue((prev) =>
+            prev.map((item) =>
+              item.id === selectedQueueId
+                ? { ...item, status: 'approved', extractedTitle: created.title }
+                : item
+            )
+          );
+        }
+        setExtractionState({ status: 'idle' });
+        setSelectedQueueId(null);
+      } catch (err: any) {
+        showToast(`Publish failed: ${err.message}`);
       }
     },
     [selectedQueueId]
@@ -298,17 +344,42 @@ export const ConsoleIngest: React.FC<ConsoleIngestProps> = ({
 
   // Save draft handler
   const handleSaveDraft = useCallback(
-    (dataToDraft: ExtractedEventData) => {
-      // TODO(handoff): replace with real draft save action
-      showToast(`Saved as draft: "${dataToDraft.title}"`);
-      if (selectedQueueId) {
-        setQueue((prev) =>
-          prev.map((item) =>
-            item.id === selectedQueueId
-              ? { ...item, status: 'draft', extractedTitle: dataToDraft.title }
-              : item
-          )
-        );
+    async (dataToDraft: ExtractedEventData) => {
+      try {
+        const slug = slugify(dataToDraft.title, dataToDraft.startDate);
+        const created = await createEvent({
+          slug,
+          title: dataToDraft.title,
+          description: dataToDraft.description,
+          startDate: dataToDraft.startDate,
+          endDate: dataToDraft.endDate,
+          city: dataToDraft.city,
+          venue: dataToDraft.venue,
+          organiser: dataToDraft.organiser,
+          organiserId: dataToDraft.organisationId,
+          category: dataToDraft.category,
+          format: dataToDraft.format,
+          priceType: dataToDraft.priceType,
+          price: dataToDraft.price,
+          registrationUrl: dataToDraft.registrationUrl,
+          featured: false,
+          status: 'draft',
+        });
+
+        showToast(`Saved as draft: "${created.title}"`);
+        if (selectedQueueId) {
+          setQueue((prev) =>
+            prev.map((item) =>
+              item.id === selectedQueueId
+                ? { ...item, status: 'draft', extractedTitle: created.title }
+                : item
+            )
+          );
+        }
+        setExtractionState({ status: 'idle' });
+        setSelectedQueueId(null);
+      } catch (err: any) {
+        showToast(`Save draft failed: ${err.message}`);
       }
     },
     [selectedQueueId]
@@ -317,7 +388,6 @@ export const ConsoleIngest: React.FC<ConsoleIngestProps> = ({
   // Reject action handler
   const handleReject = useCallback(
     (reason: string) => {
-      // TODO(handoff): replace with real rejection action
       showToast(`Rejected item (${reason})`);
       if (selectedQueueId) {
         setQueue((prev) =>

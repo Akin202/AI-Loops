@@ -127,7 +127,7 @@ export const QueueTable: React.FC<QueueTableProps> = ({
                   <td className="py-3 px-4 max-w-[200px] sm:max-w-sm truncate text-[#1C1917] font-medium">
                     {item.extractedTitle || (
                       <span className="text-[#A8A29E] font-normal italic">
-                        — Not extracted —
+                        (Not extracted)
                       </span>
                     )}
                   </td>

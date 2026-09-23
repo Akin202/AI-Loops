@@ -21,7 +21,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigateSubmit }) => {
               items={[
                 loopsConfig.tagline,
                 'VOL. IV',
-                'SEPT — DEC 2026',
+                'SEPT - DEC 2026',
               ]}
               className="text-[#B5B5B5]"
             />
