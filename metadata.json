@@ -1,0 +1,6 @@
+{
+  "name": "AI Loops",
+  "description": "Editorial index and calendar of Nigerian AI & tech events, hackathons, and convenings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
